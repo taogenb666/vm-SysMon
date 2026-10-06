@@ -150,6 +150,25 @@ def insert_sample(row: dict[str, Any], ts_ms: int) -> None:
         )
 
 
+def metric_sample_counts() -> tuple[dict[str, int], int]:
+    """Non-NULL sample count per history metric, plus the total row count.
+
+    A metric with zero samples has no data source on this host (no hwmon, no
+    GPU...). The UI greys those options out instead of hiding them, because the
+    same build may well have data on another machine.
+    """
+    conn = connect()
+    columns = sorted(set(METRIC_ALIASES.values()))
+    selects = ", ".join("COUNT(" + column + ") AS " + column for column in columns)
+    row = conn.execute("SELECT " + selects + " FROM samples").fetchone()
+    total_row = conn.execute("SELECT COUNT(*) AS n FROM samples").fetchone()
+    total = 0 if total_row is None else int(total_row["n"] or 0)
+    counts: dict[str, int] = {}
+    for alias, column in METRIC_ALIASES.items():
+        counts[alias] = 0 if row is None else int(row[column] or 0)
+    return counts, total
+
+
 def resolve_column(metric: str) -> str:
     name = METRIC_ALIASES.get(metric, metric)
     if name not in SAMPLE_COLUMNS:

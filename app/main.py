@@ -169,6 +169,7 @@ async def api_current() -> dict[str, Any]:
 @app.get("/api/meta")
 async def api_meta() -> dict[str, Any]:
     now_ms = int(time.time() * 1000)
+    sample_counts, total_samples = await asyncio.to_thread(db.metric_sample_counts)
     return {
         "version": __version__,
         "interval_s": config.SAMPLE_INTERVAL,
@@ -177,6 +178,8 @@ async def api_meta() -> dict[str, Any]:
         "server_time": now_ms,
         "metrics": list(db.METRIC_ALIASES.keys()),
         "metric_groups": db.group_metrics(list(db.METRIC_ALIASES.keys())),
+        "metric_samples": sample_counts,
+        "total_samples": total_samples,
         "alert_metrics": list(ALERT_METRICS),
         "alert_metric_groups": db.group_metrics(list(ALERT_METRICS)),
         "operators": list(OPERATORS.keys()),

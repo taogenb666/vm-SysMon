@@ -32,11 +32,16 @@
     return metricColor[metric] || palette[fallbackIndex % palette.length];
   }
 
-  function optionGroupsHtml(groups) {
+  // Options with no samples stay in the list but are greyed out: the same build
+  // may well have data for them on another host (GPU, hwmon sensors, ...).
+  function optionGroupsHtml(groups, counts, ready) {
     return (groups || []).map(function (group) {
       return '<optgroup label="' + S.escapeHtml(group.label) + '">' +
         (group.metrics || []).map(function (name) {
-          return '<option value="' + S.escapeHtml(name) + '">' + S.escapeHtml(name) + '</option>';
+          var missing = !!(ready && counts &&
+            Object.prototype.hasOwnProperty.call(counts, name) && counts[name] === 0);
+          return '<option value="' + S.escapeHtml(name) + '"' + (missing ? ' disabled' : '') + '>' +
+            S.escapeHtml(name) + (missing ? '（无数据）' : '') + '</option>';
         }).join("") +
         '</optgroup>';
     }).join("");
@@ -259,15 +264,22 @@
       meta = payload;
       var metricSelect = S.el("metric-select");
       var groups = payload.metric_groups || [{ label: "指标", metrics: payload.metrics || [] }];
+      var counts = payload.metric_samples || {};
+      // Too few samples means the collector just started: nothing is greyed yet.
+      var ready = (payload.total_samples || 0) >= 20;
       buildMetricColors(groups);
-      metricSelect.innerHTML = optionGroupsHtml(groups);
+      metricSelect.innerHTML = optionGroupsHtml(groups, counts, ready);
       ["cpu.total", "mem.percent", "net.down_bps"].forEach(function (name) {
         var option = metricSelect.querySelector('option[value="' + name + '"]');
         if (option) { option.selected = true; }
       });
+      if (!metricSelect.selectedOptions.length) {
+        var firstEnabled = metricSelect.querySelector("option:not([disabled])");
+        if (firstEnabled) { firstEnabled.selected = true; }
+      }
 
       var alertGroups = payload.alert_metric_groups || [{ label: "指标", metrics: payload.alert_metrics || [] }];
-      S.el("rule-metric").innerHTML = optionGroupsHtml(alertGroups);
+      S.el("rule-metric").innerHTML = optionGroupsHtml(alertGroups, counts, ready);
       S.el("rule-op").innerHTML = payload.operators.map(function (op) {
         return '<option value="' + S.escapeHtml(op) + '">' + S.escapeHtml(op) + '</option>';
       }).join("");
