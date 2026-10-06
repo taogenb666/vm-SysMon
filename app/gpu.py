@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import time
 from typing import Any
 
 from . import config
@@ -166,15 +167,34 @@ def _integrated() -> dict[str, Any]:
     return _blank("integrated", "lspci", name, False)
 
 
+# A failed probe (no usable GPU telemetry) is cached so the collector does not
+# fork lspci/rocm-smi every sampling interval.
+_negative: dict[str, Any] = {"until": 0.0, "value": None}
+
+
 def sample() -> dict[str, Any]:
+    now = time.time()
+    cached = _negative.get("value")
+    if cached is not None and now < float(_negative.get("until") or 0.0):
+        return cached
+
     mode = (config.GPU_MODE or "auto").lower()
     if mode == "off":
-        return _blank(None, "disabled", None, False, error="GPU probe disabled")
-    result = None
-    if mode in ("auto", "nvidia"):
-        result = _nvml() or _nvidia_smi()
-    if result is None and mode in ("auto", "amd"):
-        result = _rocm_smi()
-    if result is not None:
-        return result
-    return _integrated()
+        result = _blank(None, "disabled", None, False, error="GPU probe disabled")
+    else:
+        result = None
+        if mode in ("auto", "nvidia"):
+            result = _nvml() or _nvidia_smi()
+        if result is None and mode in ("auto", "amd"):
+            result = _rocm_smi()
+        if result is None:
+            result = _integrated()
+
+    if result.get("available"):
+        _negative["value"] = None
+        _negative["until"] = 0.0
+    else:
+        result = dict(result, cached=True, stale_after_s=max(1.0, config.GPU_IDLE_REFRESH))
+        _negative["value"] = result
+        _negative["until"] = now + max(1.0, config.GPU_IDLE_REFRESH)
+    return result

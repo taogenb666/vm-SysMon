@@ -12,6 +12,8 @@ from typing import Any, Callable
 
 import psutil
 
+from . import config
+
 UNIT_RE = re.compile(r"^[A-Za-z0-9@._:-]+\.service$")
 SIGNAL_NAMES = {"TERM": "SIGTERM", "KILL": "SIGKILL", "INT": "SIGINT", "HUP": "SIGHUP"}
 SERVICE_ACTIONS = ("start", "stop", "restart", "reload", "enable", "disable")
@@ -22,6 +24,29 @@ MAX_PROCESSES = 200
 
 class ControlError(Exception):
     """User-facing control failure; mapped to HTTP 400 by the API layer."""
+
+
+_cache_lock = threading.Lock()
+_cache: dict[str, tuple[float, Any]] = {}
+
+
+def _cached(key: str, ttl: float, producer: Callable[[], Any]) -> Any:
+    """Share one expensive probe across every open dashboard."""
+    now = time.time()
+    with _cache_lock:
+        entry = _cache.get(key)
+        if entry is not None and now - entry[0] < ttl:
+            return entry[1]
+    value = producer()
+    with _cache_lock:
+        _cache[key] = (time.time(), value)
+    return value
+
+
+def _invalidate(*keys: str) -> None:
+    with _cache_lock:
+        for key in keys:
+            _cache.pop(key, None)
 
 
 def _safe(callback: Callable[[], Any], default: Any = None) -> Any:
@@ -65,36 +90,63 @@ def prime_processes() -> int:
     return len(objects)
 
 
+def _process_row(proc: psutil.Process) -> dict[str, Any] | None:
+    try:
+        with proc.oneshot():
+            cpu = proc.cpu_percent(interval=None)
+            mem_percent = proc.memory_percent()
+            name = proc.name()
+            username = proc.username()
+            status = proc.status()
+            cmdline = proc.cmdline()
+            threads = proc.num_threads()
+            create_time = proc.create_time()
+            memory_info = proc.memory_info()
+    except (psutil.NoSuchProcess, psutil.ZombieProcess):
+        return None
+    except psutil.AccessDenied:
+        # One unreadable attribute should not hide the whole process.
+        cpu = _safe(lambda p=proc: p.cpu_percent(interval=None), 0.0) or 0.0
+        mem_percent = _safe(lambda p=proc: p.memory_percent(), 0.0) or 0.0
+        name = _safe(lambda p=proc: p.name(), "?")
+        username = _safe(lambda p=proc: p.username(), "?")
+        status = _safe(lambda p=proc: p.status(), "?")
+        cmdline = _safe(lambda p=proc: p.cmdline(), []) or []
+        threads = _safe(lambda p=proc: p.num_threads())
+        create_time = _safe(lambda p=proc: p.create_time())
+        memory_info = _safe(lambda p=proc: p.memory_info())
+    return {
+        "pid": proc.pid,
+        "name": name or "?",
+        "username": username or "?",
+        "status": status or "?",
+        "cmdline": (" ".join(cmdline)[:400] if cmdline else (name or "?")),
+        "cpu_percent": round(float(cpu or 0.0), 1),
+        "mem_percent": round(float(mem_percent or 0.0), 2),
+        "rss": None if memory_info is None else memory_info.rss,
+        "threads": threads,
+        "create_time": create_time,
+    }
+
+
+def _collect_processes() -> tuple[list[dict[str, Any]], int]:
+    rows: list[dict[str, Any]] = []
+    for proc in _process_objects():
+        entry = _process_row(proc)
+        if entry is not None:
+            rows.append(entry)
+    return rows, len(rows)
+
+
 def top_processes(limit: int = 10, sort: str = "cpu") -> tuple[list[dict[str, Any]], int]:
     limit = max(1, min(int(limit), MAX_PROCESSES))
     order = str(sort or "cpu").lower()
     if order not in ("cpu", "mem"):
         order = "cpu"
-    rows: list[dict[str, Any]] = []
-    for proc in _process_objects():
-        pid = proc.pid
-        cpu = _safe(lambda p=proc: p.cpu_percent(interval=None), 0.0) or 0.0
-        mem_percent = _safe(lambda p=proc: p.memory_percent(), 0.0) or 0.0
-        info = _safe(lambda p=proc: p.as_dict(attrs=[
-            "name", "username", "status", "cmdline", "create_time", "num_threads", "memory_info",
-        ]), {}) or {}
-        memory_info = info.get("memory_info")
-        cmdline = info.get("cmdline") or []
-        rows.append({
-            "pid": pid,
-            "name": info.get("name") or "?",
-            "username": info.get("username") or "?",
-            "status": info.get("status") or "?",
-            "cmdline": " ".join(cmdline)[:400] if cmdline else (info.get("name") or "?"),
-            "cpu_percent": round(float(cpu), 1),
-            "mem_percent": round(float(mem_percent), 2),
-            "rss": None if memory_info is None else memory_info.rss,
-            "threads": info.get("num_threads"),
-            "create_time": info.get("create_time"),
-        })
+    rows, total = _cached("processes", config.PANEL_CACHE_TTL, _collect_processes)
     key = "mem_percent" if order == "mem" else "cpu_percent"
-    rows.sort(key=lambda row: row[key], reverse=True)
-    return rows[:limit], len(rows)
+    ranked = sorted(rows, key=lambda row: row[key], reverse=True)
+    return ranked[:limit], total
 
 
 def signal_process(pid: int, sig: str = "TERM") -> dict[str, Any]:
@@ -143,8 +195,7 @@ STATUS_ORDER = {
 }
 
 
-def list_tcp_connections(limit: int = 2000) -> dict[str, Any]:
-    limit = max(1, min(int(limit), MAX_CONNECTIONS))
+def _collect_connections() -> tuple[list[dict[str, Any]], dict[str, int]]:
     try:
         raw = psutil.net_connections(kind="tcp")
     except psutil.AccessDenied as exc:
@@ -153,6 +204,7 @@ def list_tcp_connections(limit: int = 2000) -> dict[str, Any]:
         raise ControlError("cannot read connections: " + repr(exc))
     summary: dict[str, int] = {}
     rows: list[dict[str, Any]] = []
+    names: dict[int, tuple[Any, Any]] = {}
     for conn in raw:
         status = conn.status or "NONE"
         summary[status] = summary.get(status, 0) + 1
@@ -160,10 +212,13 @@ def list_tcp_connections(limit: int = 2000) -> dict[str, Any]:
         proc_name = None
         username = None
         if pid:
-            proc = _safe(lambda p=pid: psutil.Process(p))
-            if proc is not None:
-                proc_name = _safe(lambda: proc.name())
-                username = _safe(lambda: proc.username())
+            if pid not in names:
+                proc = _safe(lambda p=pid: psutil.Process(p))
+                names[pid] = (
+                    _safe(lambda: proc.name()) if proc is not None else None,
+                    _safe(lambda: proc.username()) if proc is not None else None,
+                )
+            proc_name, username = names[pid]
         laddr = getattr(conn, "laddr", None)
         raddr = getattr(conn, "raddr", None)
         rows.append({
@@ -178,6 +233,12 @@ def list_tcp_connections(limit: int = 2000) -> dict[str, Any]:
             "user": username,
         })
     rows.sort(key=lambda row: (STATUS_ORDER.get(row["status"], 9), row["local_port"] or 0))
+    return rows, summary
+
+
+def list_tcp_connections(limit: int = 2000) -> dict[str, Any]:
+    limit = max(1, min(int(limit), MAX_CONNECTIONS))
+    rows, summary = _cached("connections", config.PANEL_CACHE_TTL, _collect_connections)
     total = len(rows)
     return {
         "total": total,
@@ -284,6 +345,7 @@ def close_connection(
         if owner_pid is None:
             raise ControlError("could not identify the process owning this connection")
         result = signal_process(owner_pid, "TERM")
+        _invalidate("connections")
         return {
             "ok": True,
             "checked": not result.get("alive", True),
@@ -355,36 +417,51 @@ def _systemctl(*args: str, timeout: float = 25.0) -> subprocess.CompletedProcess
         raise ControlError("systemctl failed: " + repr(exc))
 
 
-def list_services(query: str | None = None, limit: int = 400) -> dict[str, Any]:
-    limit = max(1, min(int(limit), MAX_CONNECTIONS))
-    loaded = _systemctl("list-units", "--type=service", "--all", "--no-legend", "--no-pager", "--plain")
-    files = _systemctl("list-unit-files", "--type=service", "--no-legend", "--no-pager")
-
-    rows: dict[str, dict[str, Any]] = {}
-    for line in files.stdout.splitlines():
+def _unit_files() -> dict[str, str]:
+    result = _systemctl("list-unit-files", "--type=service", "--no-legend", "--no-pager")
+    mapping: dict[str, str] = {}
+    for line in result.stdout.splitlines():
         parts = line.split()
         if not parts or not UNIT_RE.match(parts[0]):
             continue
-        rows[parts[0]] = {
-            "unit": parts[0], "description": "", "load": "not-loaded",
-            "active": "inactive", "sub": "dead", "loaded": False,
-            "file_state": parts[1] if len(parts) > 1 else "",
-        }
-    for line in loaded.stdout.splitlines():
+        mapping[parts[0]] = parts[1] if len(parts) > 1 else ""
+    return mapping
+
+
+def _loaded_units() -> dict[str, dict[str, Any]]:
+    result = _systemctl("list-units", "--type=service", "--all", "--no-legend", "--no-pager", "--plain")
+    mapping: dict[str, dict[str, Any]] = {}
+    for line in result.stdout.splitlines():
         parts = line.split(None, 4)
         if len(parts) < 4 or not UNIT_RE.match(parts[0]):
             continue
-        unit = parts[0]
-        row = rows.get(unit) or {
-            "unit": unit, "description": "", "file_state": "",
-        }
-        row.update({
+        mapping[parts[0]] = {
             "description": parts[4] if len(parts) > 4 else "",
             "load": parts[1], "active": parts[2], "sub": parts[3], "loaded": True,
-        })
-        rows[unit] = row
+        }
+    return mapping
 
-    services = list(rows.values())
+
+def _collect_services() -> list[dict[str, Any]]:
+    files = _cached("services:files", config.SERVICE_FILE_CACHE_TTL, _unit_files)
+    loaded = _cached("services:units", config.SERVICE_CACHE_TTL, _loaded_units)
+    rows: dict[str, dict[str, Any]] = {}
+    for unit, file_state in files.items():
+        rows[unit] = {
+            "unit": unit, "description": "", "load": "not-loaded",
+            "active": "inactive", "sub": "dead", "loaded": False,
+            "file_state": file_state,
+        }
+    for unit, info in loaded.items():
+        row = rows.get(unit) or {"unit": unit, "description": "", "file_state": ""}
+        row.update(info)
+        rows[unit] = row
+    return list(rows.values())
+
+
+def list_services(query: str | None = None, limit: int = 400) -> dict[str, Any]:
+    limit = max(1, min(int(limit), MAX_CONNECTIONS))
+    services = list(_cached("services:rows", config.SERVICE_CACHE_TTL, _collect_services))
     if query:
         needle = str(query).strip().lower()
         services = [
@@ -409,6 +486,7 @@ def service_action(unit: str, action: str) -> dict[str, Any]:
         raise ControlError("refusing to " + verb + " " + unit + ": it serves this panel")
     proc = _systemctl(verb, unit, timeout=40.0)
     output = (proc.stdout + proc.stderr).strip()
+    _invalidate("services:rows", "services:units")
     return {
         "unit": unit,
         "action": verb,

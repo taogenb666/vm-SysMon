@@ -42,5 +42,18 @@ MAX_HISTORY_POINTS: int = _env_int("SYSMON_MAX_POINTS", 1200)
 # GPU probing: auto | nvidia | amd | off
 GPU_MODE: str = _env_str("SYSMON_GPU_MODE", "auto")
 
+# How long an unsuccessful GPU probe is trusted before re-probing. Without this
+# the collector would spawn lspci (or rocm-smi) on every single sample.
+GPU_IDLE_REFRESH: float = _env_float("SYSMON_GPU_IDLE_REFRESH", 300.0)
+
+# How often the always-on sampler recounts sockets (psutil.net_connections is
+# one of the most expensive calls in the sampling loop).
+CONNECTION_REFRESH: float = _env_float("SYSMON_CONNECTION_REFRESH", 15.0)
+
+# TTL caches for the on-demand panels, so N open dashboards share one probe.
+PANEL_CACHE_TTL: float = _env_float("SYSMON_PANEL_CACHE_TTL", 3.0)
+SERVICE_CACHE_TTL: float = _env_float("SYSMON_SERVICE_CACHE_TTL", 5.0)
+SERVICE_FILE_CACHE_TTL: float = _env_float("SYSMON_SERVICE_FILE_CACHE_TTL", 300.0)
+
 # Optional webhook called with a JSON body when an alert opens.
 ALERT_WEBHOOK_URL: str = _env_str("SYSMON_WEBHOOK_URL", "")

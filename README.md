@@ -1,7 +1,10 @@
 # SysMon · 轻量级 Linux 系统监控面板
 
 一个单机运行的 Web 监控面板：后台每 2 秒采集一次系统指标，写入 SQLite，
-通过 WebSocket（SSE 兜底）推送到前端实时展示；历史数据可按时间范围查询并绘图。
+通过 WebSocket（SSE 兜底）推送到前端实时展示；历史数据可按时间范围查询并绘图；
+并提供进程、TCP 连接、systemd 服务的在线操作。
+
+> 完整使用说明见 [USER_MANUAL.md](USER_MANUAL.md)。
 
 ## 目录结构
 
@@ -24,7 +27,8 @@
     │       └── history.js     # 历史查询与规则 CRUD
     ├── requirements.txt
     ├── run.sh                 # 一键启动（自动建 venv 并装依赖）
-    ├── README.md
+    ├── README.md              # 开发与架构速览
+    ├── USER_MANUAL.md         # 完整用户手册（安装、界面、操作、API、排障）
     └── data/sysmon.db         # 运行时自动创建
 
 ## 快速开始

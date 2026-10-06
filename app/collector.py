@@ -101,6 +101,8 @@ class Collector:
         self._prev_disk: dict[str, tuple[float, float, float, float]] = {}
         self._prev_net: dict[str, tuple[int, int]] = {}
         self._static = self._static_info()
+        self._conn_ts = 0.0
+        self._conn_count: int | None = None
         # Prime psutil percentage counters so the first real sample is meaningful.
         psutil.cpu_percent(interval=None)
         psutil.cpu_percent(interval=None, percpu=True)
@@ -395,16 +397,24 @@ class Collector:
                 "drops_out": counter.dropout,
                 "addresses": iface_addresses,
             })
-        try:
-            connections = len(psutil.net_connections(kind="inet"))
-        except Exception:
-            connections = None
+        connections = self._connection_count()
         return {
             "interfaces": interfaces,
             "total_up_bps": _round(total_up) if have else None,
             "total_down_bps": _round(total_down) if have else None,
             "connections": connections,
         }
+
+    def _connection_count(self) -> int | None:
+        """Socket counting is expensive (~4 ms), so refresh it on its own clock."""
+        now = time.time()
+        if self._conn_count is None or now - self._conn_ts >= config.CONNECTION_REFRESH:
+            try:
+                self._conn_count = len(psutil.net_connections(kind="inet"))
+            except Exception:
+                self._conn_count = None
+            self._conn_ts = now
+        return self._conn_count
 
     def _gpu(self) -> dict[str, Any]:
         try:
