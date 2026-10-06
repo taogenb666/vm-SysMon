@@ -7,6 +7,56 @@
   var palette = ["#38bdf8", "#a855f7", "#22c55e", "#f59e0b", "#ef4444", "#14b8a6"];
   var meta = null;
 
+  // The API returns raw numbers, so every metric is mapped to a unit kind and
+  // rendered with its own formatter (axis labels, tooltip and legend).
+  var UNIT_KINDS = {
+    "cpu.total": "percent", "mem.percent": "percent", "swap.percent": "percent", "gpu.util": "percent",
+    "mem.total": "bytes", "mem.used": "bytes", "mem.avail": "bytes", "mem.cached": "bytes",
+    "swap.total": "bytes", "swap.used": "bytes",
+    "disk.read_bps": "rate", "disk.write_bps": "rate", "net.up_bps": "rate", "net.down_bps": "rate",
+    "gpu.mem_used": "mbytes", "gpu.mem_total": "mbytes",
+    "cpu.temp": "temp", "gpu.temp": "temp", "gpu.power": "power", "fan.rpm": "rpm",
+    "load.1": "load", "load.5": "load", "load.15": "load",
+    "disk.read_iops": "iops", "disk.write_iops": "iops",
+    "sys.uptime": "duration",
+    "sys.proc_count": "count", "sys.user_count": "count", "net.conns": "count"
+  };
+  var UNIT_LABELS = {
+    percent: "%", bytes: "B", rate: "B/s", mbytes: "MB", temp: "°C", power: "W",
+    rpm: "RPM", load: "load", iops: "IOPS", duration: "时长", count: "个", plain: ""
+  };
+  var seriesMetric = {};
+
+  function unitKind(metric) { return UNIT_KINDS[metric] || "plain"; }
+
+  function formatValue(metric, value) {
+    if (value === null || value === undefined || isNaN(value)) { return "--"; }
+    var kind = unitKind(metric);
+    if (kind === "percent") { return S.fmtNum(value, 1) + "%"; }
+    if (kind === "bytes") { return S.fmtBytes(value, 1); }
+    if (kind === "rate") { return S.fmtBps(value); }
+    if (kind === "mbytes") { return S.fmtNum(value, 1) + " MB"; }
+    if (kind === "temp") { return S.fmtNum(value, 1) + " °C"; }
+    if (kind === "power") { return S.fmtNum(value, 1) + " W"; }
+    if (kind === "rpm") { return S.fmtNum(value, 0) + " RPM"; }
+    if (kind === "duration") { return S.fmtDuration(value); }
+    if (kind === "count") { return S.fmtNum(value, 0); }
+    if (kind === "iops") { return S.fmtNum(value, 2) + " IOPS"; }
+    if (kind === "load") { return S.fmtNum(value, 2); }
+    return S.fmtNum(value, 2);
+  }
+
+  function axisLabel(kind, value) {
+    if (kind === "percent") { return S.fmtNum(value, 0) + "%"; }
+    if (kind === "bytes" || kind === "rate") { return S.fmtBytes(value, 0); }
+    if (kind === "mbytes") { return S.fmtNum(value, 0) + "M"; }
+    if (kind === "temp") { return S.fmtNum(value, 0) + "°"; }
+    if (kind === "power") { return S.fmtNum(value, 0) + "W"; }
+    if (kind === "count") { return S.fmtNum(value, 0); }
+    if (kind === "duration") { return S.fmtDuration(value); }
+    return value;
+  }
+
   function isoFromRange(seconds) {
     var now = new Date();
     var start = new Date(now.getTime() - seconds * 1000);
@@ -34,7 +84,8 @@
     if (typeof echarts === "undefined") { return; }
     chart = echarts.init(S.el("chart-history"));
     var option = S.lineChartDefaults();
-    option.xAxis.type = "time";   // history points are [timestamp, value]
+    option.xAxis.type = "time";        // history points are [timestamp, value]
+    option.yAxis = [option.yAxis];     // array form: a query may add a second axis
     option.series = [];
     chart.setOption(option);
     window.addEventListener("resize", function () { if (chart) { chart.resize(); } });
@@ -56,14 +107,24 @@
       if (endMs) { url += "&end=" + endMs; }
       return S.getJSON(url).then(function (data) { return { metric: metric, data: data, color: palette[index % palette.length] }; });
     })).then(function (results) {
+      seriesMetric = {};
+      var kinds = [];
       results.forEach(function (entry) {
-        var points = entry.data.points || [];
+        var kind = unitKind(entry.metric);
+        if (kinds.indexOf(kind) === -1) { kinds.push(kind); }
+      });
+      results.forEach(function (entry) {
+        var kind = unitKind(entry.metric);
+        var label = UNIT_LABELS[kind];
+        var name = label ? entry.metric + " (" + label + ")" : entry.metric;
+        seriesMetric[name] = entry.metric;
         series.push({
-          name: entry.metric,
+          name: name,
           type: "line",
           smooth: true,
           showSymbol: false,
-          data: points,
+          yAxisIndex: kinds.indexOf(kind) === 0 ? 0 : 1,
+          data: entry.data.points || [],
           lineStyle: { width: 2, color: entry.color },
           itemStyle: { color: entry.color }
         });
@@ -72,23 +133,42 @@
       if (first) {
         S.setText("chart-range", S.fmtClock(first.start) + " → " + S.fmtClock(first.end) + "（" + first.total + " 条原始样本）");
       }
-      // Merge, never notMerge: replacing the option drops the axes and makes
-      // ECharts 5.5 throw when the x axis type is set afterwards.
+      var axes = [{
+        type: "value",
+        name: UNIT_LABELS[kinds[0]] || "",
+        nameTextStyle: { color: "#94a3b8" },
+        scale: kinds[0] !== "percent",
+        axisLabel: { color: "#94a3b8", formatter: function (value) { return axisLabel(kinds[0], value); } }
+      }];
+      if (kinds.length > 1) {
+        axes.push({
+          type: "value",
+          position: "right",
+          name: UNIT_LABELS[kinds[1]] || "",
+          nameTextStyle: { color: "#94a3b8" },
+          scale: true,
+          axisLabel: { color: "#94a3b8", formatter: function (value) { return axisLabel(kinds[1], value); } }
+        });
+      }
+      // replaceMerge (never notMerge) discards series and axes that are no
+      // longer selected, while the base option's grid and time axis survive.
       chart.setOption({
         series: series,
+        yAxis: axes,
         tooltip: {
           trigger: "axis",
           formatter: function (params) {
             if (!params || !params.length) { return ""; }
             var lines = [S.fmtClock(params[0].value[0])];
             params.forEach(function (item) {
-              lines.push(item.marker + " " + item.seriesName + ": " + S.fmtNum(item.value[1], 2));
+              var metric = seriesMetric[item.seriesName] || item.seriesName;
+              lines.push(item.marker + " " + item.seriesName + ": " + formatValue(metric, item.value[1]));
             });
             return lines.join("<br>");
           }
         }
-      });
-      S.setText("query-status", "完成 · " + series.length + " 个序列");
+      }, { replaceMerge: ["series", "yAxis"] });
+      S.setText("query-status", "完成 · " + series.length + " 个序列" + (kinds.length > 1 ? "（左右双轴，各自单位）" : ""));
     }).catch(function (err) {
       S.setText("query-status", "查询失败: " + err.message);
     });
