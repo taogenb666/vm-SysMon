@@ -176,7 +176,9 @@ async def api_meta() -> dict[str, Any]:
         "max_points": config.MAX_HISTORY_POINTS,
         "server_time": now_ms,
         "metrics": list(db.METRIC_ALIASES.keys()),
+        "metric_groups": db.group_metrics(list(db.METRIC_ALIASES.keys())),
         "alert_metrics": list(ALERT_METRICS),
+        "alert_metric_groups": db.group_metrics(list(ALERT_METRICS)),
         "operators": list(OPERATORS.keys()),
         "system": None if collector.latest is None else collector.latest.get("system"),
     }

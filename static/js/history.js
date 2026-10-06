@@ -7,6 +7,41 @@
   var palette = ["#38bdf8", "#a855f7", "#22c55e", "#f59e0b", "#ef4444", "#14b8a6"];
   var meta = null;
 
+  // One hue family per metric group; the shades keep same-group curves apart.
+  var GROUP_STYLES = {
+    "CPU":  ["#38bdf8", "#0ea5e9", "#22d3ee", "#67e8f9", "#0284c7", "#7dd3fc"],
+    "内存": ["#a855f7", "#c084fc", "#8b5cf6", "#d946ef", "#e879f9", "#a78bfa", "#f0abfc", "#7e22ce"],
+    "磁盘": ["#f59e0b", "#fbbf24", "#fb923c", "#fcd34d"],
+    "网络": ["#22c55e", "#4ade80", "#2dd4bf", "#a3e635"],
+    "GPU":  ["#ef4444", "#f87171", "#fb7185", "#ec4899", "#f43f5e"],
+    "系统": ["#94a3b8", "#cbd5e1", "#64748b"],
+    "其他": ["#e2e8f0", "#cbd5e1"]
+  };
+  var metricColor = {};
+
+  function buildMetricColors(groups) {
+    (groups || []).forEach(function (group) {
+      var shades = GROUP_STYLES[group.label] || GROUP_STYLES["其他"];
+      (group.metrics || []).forEach(function (name, index) {
+        metricColor[name] = shades[index % shades.length];
+      });
+    });
+  }
+
+  function colorFor(metric, fallbackIndex) {
+    return metricColor[metric] || palette[fallbackIndex % palette.length];
+  }
+
+  function optionGroupsHtml(groups) {
+    return (groups || []).map(function (group) {
+      return '<optgroup label="' + S.escapeHtml(group.label) + '">' +
+        (group.metrics || []).map(function (name) {
+          return '<option value="' + S.escapeHtml(name) + '">' + S.escapeHtml(name) + '</option>';
+        }).join("") +
+        '</optgroup>';
+    }).join("");
+  }
+
   // The API returns raw numbers, so every metric is mapped to a unit kind and
   // rendered with its own formatter (axis labels, tooltip and legend).
   var UNIT_KINDS = {
@@ -105,7 +140,7 @@
       var url = "/api/history?metric=" + encodeURIComponent(metric) + "&limit=2000";
       if (startMs) { url += "&start=" + startMs; }
       if (endMs) { url += "&end=" + endMs; }
-      return S.getJSON(url).then(function (data) { return { metric: metric, data: data, color: palette[index % palette.length] }; });
+      return S.getJSON(url).then(function (data) { return { metric: metric, data: data, color: colorFor(metric, index) }; });
     })).then(function (results) {
       seriesMetric = {};
       var kinds = [];
@@ -223,17 +258,16 @@
     return S.getJSON("/api/meta").then(function (payload) {
       meta = payload;
       var metricSelect = S.el("metric-select");
-      metricSelect.innerHTML = payload.metrics.map(function (name) {
-        return '<option value="' + S.escapeHtml(name) + '">' + S.escapeHtml(name) + '</option>';
-      }).join("");
+      var groups = payload.metric_groups || [{ label: "指标", metrics: payload.metrics || [] }];
+      buildMetricColors(groups);
+      metricSelect.innerHTML = optionGroupsHtml(groups);
       ["cpu.total", "mem.percent", "net.down_bps"].forEach(function (name) {
         var option = metricSelect.querySelector('option[value="' + name + '"]');
         if (option) { option.selected = true; }
       });
 
-      S.el("rule-metric").innerHTML = payload.alert_metrics.map(function (name) {
-        return '<option value="' + S.escapeHtml(name) + '">' + S.escapeHtml(name) + '</option>';
-      }).join("");
+      var alertGroups = payload.alert_metric_groups || [{ label: "指标", metrics: payload.alert_metrics || [] }];
+      S.el("rule-metric").innerHTML = optionGroupsHtml(alertGroups);
       S.el("rule-op").innerHTML = payload.operators.map(function (op) {
         return '<option value="' + S.escapeHtml(op) + '">' + S.escapeHtml(op) + '</option>';
       }).join("");

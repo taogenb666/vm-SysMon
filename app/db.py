@@ -54,6 +54,39 @@ METRIC_ALIASES: dict[str, str] = {
     "sys.uptime": "uptime",
 }
 
+# UI grouping: keeps the metric pickers scannable and drives chart colours.
+METRIC_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("CPU", ("cpu.total", "cpu.temp", "fan.rpm", "load.1", "load.5", "load.15")),
+    ("内存", ("mem.total", "mem.used", "mem.avail", "mem.cached", "mem.percent",
+              "swap.total", "swap.used", "swap.percent")),
+    ("磁盘", ("disk.read_bps", "disk.write_bps", "disk.read_iops", "disk.write_iops")),
+    ("网络", ("net.up_bps", "net.down_bps", "net.conns")),
+    ("GPU", ("gpu.util", "gpu.mem_used", "gpu.mem_total", "gpu.temp", "gpu.power")),
+    ("系统", ("sys.proc_count", "sys.user_count", "sys.uptime")),
+)
+
+METRIC_LABELS: dict[str, str] = {
+    name: label for label, names in METRIC_GROUPS for name in names
+}
+
+# Alert-only virtual metrics that have no history column of their own.
+METRIC_LABELS["disk.max_percent"] = "磁盘"
+
+
+def group_metrics(names: Any) -> list[dict[str, Any]]:
+    """Bucket metric names into their groups, keeping the canonical order."""
+    buckets: dict[str, list[str]] = {}
+    for name in names:
+        buckets.setdefault(METRIC_LABELS.get(name, "其他"), []).append(name)
+    groups = [
+        {"label": label, "metrics": buckets[label]}
+        for label, _ in METRIC_GROUPS if buckets.get(label)
+    ]
+    if buckets.get("其他"):
+        groups.append({"label": "其他", "metrics": buckets["其他"]})
+    return groups
+
+
 DEFAULT_RULES: tuple[tuple[Any, ...], ...] = (
     ("cpu.total", ">", 90.0, 5, "CPU usage above 90%"),
     ("mem.percent", ">", 90.0, 5, "Memory usage above 90%"),
