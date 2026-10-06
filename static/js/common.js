@@ -148,8 +148,20 @@
     };
   }
 
+  function toast(message, kind) {
+    var node = el("sysmon-toast");
+    if (!node) { return; }
+    node.className = "sysmon-toast show text-bg-" + (kind || "info");
+    node.textContent = message;
+    if (global.__sysmonToastTimer) { clearTimeout(global.__sysmonToastTimer); }
+    global.__sysmonToastTimer = setTimeout(function () {
+      node.className = "sysmon-toast";
+    }, 4000);
+  }
+
   global.SysMon = {
     el: el,
+    toast: toast,
     setText: setText,
     isNum: isNum,
     fmtBytes: fmtBytes,

@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import __version__, config, db
+from . import __version__, config, db, system
 from .alerts import ALERT_METRICS, OPERATORS, AlertEngine
 from .collector import Collector
 
@@ -71,6 +71,7 @@ async def lifespan(app: FastAPI):
     tasks = [
         asyncio.create_task(collector.run(hub.publish)),
         asyncio.create_task(_cleanup_loop()),
+        asyncio.create_task(asyncio.to_thread(system.prime_processes)),
     ]
     try:
         yield
@@ -104,6 +105,23 @@ class RulePatch(BaseModel):
     duration_s: int | None = Field(None, ge=0)
     enabled: bool | None = None
     note: str | None = None
+
+
+class ProcessSignalIn(BaseModel):
+    signal: str = Field("TERM", description="TERM | KILL | INT | HUP")
+
+
+class ConnectionCloseIn(BaseModel):
+    local_ip: str | None = None
+    local_port: int | None = None
+    remote_ip: str | None = None
+    remote_port: int | None = None
+    status: str | None = None
+    mode: str = Field("destroy", description="destroy | kill-owner")
+
+
+class ServiceActionIn(BaseModel):
+    action: str = Field(..., description="start | stop | restart | reload | enable | disable")
 
 
 def _validate_rule(metric: str, op: str) -> None:
@@ -233,6 +251,69 @@ async def api_alert_delete(rule_id: int) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="rule not found")
     engine.reload()
     return {"deleted": True}
+
+
+def _control_error(exc: Exception) -> HTTPException:
+    return HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/api/processes")
+async def api_processes(
+    limit: int = Query(10, ge=1, le=200),
+    sort: str = Query("cpu", pattern="^(cpu|mem)$"),
+) -> dict[str, Any]:
+    try:
+        processes, total = await asyncio.to_thread(system.top_processes, limit, sort)
+    except system.ControlError as exc:
+        raise _control_error(exc)
+    return {"total": total, "sort": sort, "processes": processes}
+
+
+@app.post("/api/processes/{pid}/signal")
+async def api_process_signal(pid: int, payload: ProcessSignalIn) -> dict[str, Any]:
+    try:
+        return await asyncio.to_thread(system.signal_process, pid, payload.signal)
+    except system.ControlError as exc:
+        raise _control_error(exc)
+
+
+@app.get("/api/connections")
+async def api_connections(limit: int = Query(200, ge=1, le=2000)) -> dict[str, Any]:
+    try:
+        return await asyncio.to_thread(system.list_tcp_connections, limit)
+    except system.ControlError as exc:
+        raise _control_error(exc)
+
+
+@app.post("/api/connections/close")
+async def api_connection_close(payload: ConnectionCloseIn) -> dict[str, Any]:
+    try:
+        return await asyncio.to_thread(
+            system.close_connection,
+            payload.local_ip, payload.local_port, payload.remote_ip, payload.remote_port,
+            payload.status, payload.mode,
+        )
+    except system.ControlError as exc:
+        raise _control_error(exc)
+
+
+@app.get("/api/services")
+async def api_services(
+    query: str | None = Query(None),
+    limit: int = Query(400, ge=1, le=2000),
+) -> dict[str, Any]:
+    try:
+        return await asyncio.to_thread(system.list_services, query, limit)
+    except system.ControlError as exc:
+        raise _control_error(exc)
+
+
+@app.post("/api/services/{unit}/action")
+async def api_service_action(unit: str, payload: ServiceActionIn) -> dict[str, Any]:
+    try:
+        return await asyncio.to_thread(system.service_action, unit, payload.action)
+    except system.ControlError as exc:
+        raise _control_error(exc)
 
 
 @app.get("/api/stream")

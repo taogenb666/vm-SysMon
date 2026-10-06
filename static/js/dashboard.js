@@ -171,22 +171,6 @@
     body.innerHTML = html || '<tr><td colspan="5" class="text-secondary small">无网卡</td></tr>';
   }
 
-  function renderSensors(sensors) {
-    var body = S.el("sensors-body");
-    if (!body) { return; }
-    var html = "";
-    (sensors.temperatures || []).forEach(function (temp) {
-      html += '<tr><td>' + S.escapeHtml(temp.chip) + '</td><td class="text-secondary small">' + S.escapeHtml(temp.label) + '</td>' +
-        '<td class="text-end">' + S.fmtNum(temp.current, 1) + ' °C</td>' +
-        '<td class="text-end text-secondary small">' + S.fmtNum(temp.high, 0) + ' / ' + S.fmtNum(temp.critical, 0) + '</td></tr>';
-    });
-    (sensors.fans || []).forEach(function (fan) {
-      html += '<tr><td>' + S.escapeHtml(fan.chip) + '</td><td class="text-secondary small">' + S.escapeHtml(fan.label) + '</td>' +
-        '<td class="text-end">' + S.fmtNum(fan.rpm, 0) + ' RPM</td><td class="text-end text-secondary small">-</td></tr>';
-    });
-    body.innerHTML = html || '<tr><td colspan="4" class="text-secondary small">无传感器数据</td></tr>';
-  }
-
   function renderAlerts(alerts) {
     var body = S.el("alerts-body");
     var badge = S.el("alert-count");
@@ -220,7 +204,6 @@
     renderGpu(snapshot.gpu);
     renderDisks(snapshot.disks, snapshot.disk_io);
     renderNet(snapshot.net);
-    renderSensors(snapshot.sensors || {});
     renderAlerts(snapshot.alerts);
     pushSeries(snapshot);
   }

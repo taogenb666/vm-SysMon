@@ -88,6 +88,12 @@
 | POST | /api/alerts | 新增规则 {metric, op, threshold, duration_s, note} |
 | PATCH | /api/alerts/{id} | 更新规则（含 enabled 开关） |
 | DELETE | /api/alerts/{id} | 删除规则 |
+| GET | /api/processes?limit=&sort=cpu | 进程 Top N（cpu / mem 排序） |
+| POST | /api/processes/{pid}/signal | 结束进程 {signal: TERM/KILL/INT/HUP} |
+| GET | /api/connections?limit= | TCP 连接状态统计与列表 |
+| POST | /api/connections/close | 关闭连接 {local_ip, local_port, remote_ip, remote_port, mode: destroy/kill-owner} |
+| GET | /api/services?query=&limit= | systemd 服务列表（含 enabled/active 状态） |
+| POST | /api/services/{unit}/action | 启停服务 {action: start/stop/restart/reload/enable/disable} |
 | GET | /api/stream | SSE 实时流 |
 | WS | /ws/live | WebSocket 实时流 |
 
@@ -108,4 +114,6 @@ sys.proc_count, sys.user_count, sys.uptime
 - 前端通过 CDN 加载 Bootstrap 5 与 ECharts 5；离线环境可把两个文件下载到 static/vendor/ 并修改 HTML 引用。
 - 默认按 2 秒采样、保留 7 天，约 30 万行、数十 MB；如磁盘紧张可调小保留天数或加大采样间隔。
 - 无 nvidia-smi / rocm-smi 且未安装 pynvml 时，GPU 卡片会显示集显名称或"无可用遥测"，不影响其他功能。
-- 温度/风扇依赖内核 hwmon 传感器；容器或虚拟机中通常为空。
+- 温度/风扇依赖内核 hwmon 传感器；容器或虚拟机中通常为空（面板已移除传感器卡片，数据仍随快照保留供告警使用）。
+- 连接的直接销毁依赖内核 CONFIG_INET_DIAG_DESTROY（即 ss -K）；未启用时接口返回 destroy_supported=false，面板会自动改为结束占用该连接的进程。
+- 控制类接口以 root 权限执行（结束进程/启停服务），默认监听 0.0.0.0，请勿直接暴露到公网；对外访问请置于反向代理与鉴权之后。
