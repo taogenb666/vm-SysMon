@@ -1,0 +1,6 @@
+fastapi>=0.110
+uvicorn>=0.29
+websockets>=12
+psutil>=5.9
+# Optional, only for NVIDIA telemetry without the nvidia-smi binary:
+# pynvml>=11.5
