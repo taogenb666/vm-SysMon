@@ -19,6 +19,19 @@
 
   /* ---------------- processes ---------------- */
 
+  function memUnit() {
+    var node = S.el("proc-mem-unit");
+    return (node && node.value === "mb") ? "mb" : "percent";
+  }
+
+  function formatMemory(row) {
+    if (memUnit() === "mb") {
+      if (row.rss === null || row.rss === undefined) { return "--"; }
+      return S.fmtNum(row.rss / 1048576, 1) + " MB";
+    }
+    return S.fmtNum(row.mem_percent, 1) + "%";
+  }
+
   function loadProcesses() {
     var sortNode = S.el("proc-sort");
     var sort = sortNode ? sortNode.value : "cpu";
@@ -36,7 +49,7 @@
           '<td class="text-truncate proc-name" title="' + S.escapeHtml(row.cmdline) + '">' + S.escapeHtml(row.name) + '</td>' +
           '<td class="text-secondary small">' + S.escapeHtml(row.username) + '</td>' +
           '<td class="text-end">' + S.fmtNum(row.cpu_percent, 1) + '%</td>' +
-          '<td class="text-end">' + S.fmtNum(row.mem_percent, 1) + '%</td>' +
+          '<td class="text-end">' + formatMemory(row) + '</td>' +
           '<td class="text-end text-nowrap">' +
           '<button class="btn btn-sm btn-outline-warning" data-proc="' + row.pid + '" data-proc-name="' + S.escapeHtml(row.name) + '">结束</button>' +
           '<button class="btn btn-sm btn-outline-danger ms-1" data-kill="' + row.pid + '" data-proc-name="' + S.escapeHtml(row.name) + '">强杀</button>' +
@@ -217,6 +230,18 @@
   document.addEventListener("DOMContentLoaded", function () {
     S.el("proc-refresh").addEventListener("click", loadProcesses);
     S.el("proc-sort").addEventListener("change", loadProcesses);
+
+    var unitNode = S.el("proc-mem-unit");
+    if (unitNode) {
+      try {
+        var savedUnit = window.localStorage.getItem("sysmon.memUnit");
+        if (savedUnit) { unitNode.value = savedUnit; }
+      } catch (err) { /* storage unavailable */ }
+      unitNode.addEventListener("change", function () {
+        try { window.localStorage.setItem("sysmon.memUnit", unitNode.value); } catch (err) { /* storage unavailable */ }
+        loadProcesses();
+      });
+    }
     S.el("conn-refresh").addEventListener("click", loadConnections);
     S.el("svc-refresh").addEventListener("click", loadServices);
     S.el("svc-search").addEventListener("input", debounce(loadServices, 350));
