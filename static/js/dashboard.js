@@ -76,6 +76,9 @@
     if (!system) { return; }
     S.setText("sys-host", system.hostname);
     S.setText("sys-hostname", system.hostname);
+    S.setText("sys-cpu", system.cpu_model);
+    var cpuNode = S.el("sys-cpu");
+    if (cpuNode) { cpuNode.title = system.cpu_model || ""; }
     S.setText("sys-distro", system.distro);
     S.setText("sys-kernel", system.kernel);
     S.setText("sys-arch", system.arch);

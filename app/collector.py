@@ -2,8 +2,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import os
 import platform
+import shutil
 import socket
+import subprocess
 import time
 from datetime import datetime, timezone
 from typing import Any, Callable
@@ -27,6 +31,64 @@ def _round(value: Any, digits: int = 1) -> Any:
         return round(float(value), digits)
     except (TypeError, ValueError):
         return None
+
+
+CPUINFO_MODEL_KEYS = ("model name", "cpu model", "hardware", "model", "cpu")
+
+
+def _cpu_model_from_cpuinfo() -> str | None:
+    """/proc/cpuinfo exposes the model on x86 and most ARM boards."""
+    fields: dict[str, str] = {}
+    try:
+        with open("/proc/cpuinfo", "r", encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                if ":" not in line:
+                    continue
+                key, value = line.split(":", 1)
+                key = key.strip().lower()
+                if key not in fields:
+                    fields[key] = value.strip()
+    except OSError:
+        return None
+    for key in CPUINFO_MODEL_KEYS:
+        value = fields.get(key)
+        if value and value not in ("-", "0"):
+            return value
+    return None
+
+
+def _cpu_model_from_lscpu() -> str | None:
+    """lscpu -J also reports the BIOS/DMI processor model (VMs, ARM SoCs)."""
+    exe = shutil.which("lscpu")
+    if not exe:
+        return None
+    try:
+        env = dict(os.environ)
+        env["LC_ALL"] = "C"
+        proc = subprocess.run([exe, "-J"], capture_output=True, text=True, timeout=3.0, env=env)
+        payload = json.loads(proc.stdout or "{}")
+    except Exception:
+        return None
+    fields: dict[str, str] = {}
+    for item in payload.get("lscpu", []):
+        key = str(item.get("field", "")).rstrip(":").strip().lower()
+        fields[key] = str(item.get("data", "") or "").strip()
+    for key in ("model name", "bios model name"):
+        value = fields.get(key)
+        if value and value not in ("-", "0"):
+            return value
+    return None
+
+
+def resolve_cpu_model() -> str | None:
+    for resolver in (_cpu_model_from_cpuinfo, _cpu_model_from_lscpu):
+        try:
+            value = resolver()
+        except Exception:
+            value = None
+        if value:
+            return value
+    return None
 
 
 class Collector:
@@ -103,6 +165,7 @@ class Collector:
     def _static_info(self) -> dict[str, Any]:
         info: dict[str, Any] = {
             "hostname": socket.gethostname(),
+            "cpu_model": resolve_cpu_model(),
             "platform": platform.platform(),
             "system": platform.system(),
             "kernel": platform.release(),
