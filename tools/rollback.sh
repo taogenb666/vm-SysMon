@@ -13,6 +13,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_DIR="$(git -C "$PROJECT_DIR" rev-parse --show-toplevel)"
 SUBTREE="$(git -C "$PROJECT_DIR" rev-parse --show-prefix)"
+# A repo cloned from GitHub has the project at its root, so the prefix is empty.
+[ -n "$SUBTREE" ] || SUBTREE="."
 SERVICE="$(printenv SYSMON_SERVICE 2>/dev/null || true)"
 [ -n "$SERVICE" ] || SERVICE=sysmon
 

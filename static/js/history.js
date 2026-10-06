@@ -306,10 +306,26 @@
   document.addEventListener("DOMContentLoaded", function () {
     buildChart();
     applyRange(3600);
+
+    // There is no query button any more: every control re-queries on its own.
     document.querySelectorAll("#range-presets button").forEach(function (button) {
-      button.addEventListener("click", function () { applyRange(Number(button.getAttribute("data-range"))); });
+      button.addEventListener("click", function () {
+        applyRange(Number(button.getAttribute("data-range")));
+        query();
+      });
     });
-    S.el("query-btn").addEventListener("click", query);
+    ["start-time", "end-time"].forEach(function (id) {
+      S.el(id).addEventListener("change", function () { query(); });
+    });
+
+    // Clicking a metric renders it straight away. The tiny delay only coalesces
+    // the rapid events of a Ctrl+click multi-select into one request.
+    var pending = null;
+    S.el("metric-select").addEventListener("change", function () {
+      if (pending) { clearTimeout(pending); }
+      pending = setTimeout(function () { pending = null; query(); }, 120);
+    });
+
     S.el("rule-form").addEventListener("submit", addRule);
     fillOptions().then(function () { loadRules(); query(); }).catch(showError);
   });

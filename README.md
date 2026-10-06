@@ -35,10 +35,11 @@
 
 ## 快速开始
 
-    cd sysmon
+    git clone https://github.com/taogenb666/vm-SysMon.git
+    cd vm-SysMon
     ./run.sh                  # 首次会创建 .venv 并安装依赖
 
-然后打开 http://<本机IP>:8000/ 。
+然后打开 http://<本机IP>:8000/ 。（克隆下来项目就在仓库根目录。）
 
 在**新主机**上部署成常驻服务（需要 root）：
 

@@ -32,9 +32,12 @@ SQLite，通过 WebSocket 实时推送到浏览器；提供实时仪表盘、历
 ### 1.1 一键启动
 
 ~~~bash
-cd sysmon
+git clone https://github.com/taogenb666/vm-SysMon.git
+cd vm-SysMon
 ./run.sh
 ~~~
+
+从 GitHub 克隆后，项目就位于仓库根目录（app/、static/、install.sh 等都在这一层）。
 
 首次运行会自动创建 .venv 虚拟环境并安装依赖，随后监听 0.0.0.0:8000。
 
@@ -489,8 +492,11 @@ rm -rf /path/to/sysmon          # 数据在 sysmon/data/sysmon.db，按需保留
 
 ## 14. 版本管理与回退
 
-项目使用 Git 做版本管理。仓库位于工作区根目录
-/root/.openclaw/workspace/system-tester，sysmon/ 是仓库里的一个子目录。
+项目使用 Git 做版本管理。这里有两份布局，别搞混：
+
+- **GitHub 仓库**（taogenb666/vm-SysMon）：项目直接位于仓库根目录。
+- **本机工作区仓库**（/root/.openclaw/workspace/system-tester）：项目在 sysmon/ 子目录下，
+  因为仓库根还放着不应发布的 agent 私有文件。两者内容一致。
 每次改动都已提交，提交信息说明了改了什么。
 
 ### 14.1 查看现状
