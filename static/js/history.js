@@ -7,29 +7,37 @@
   var palette = ["#38bdf8", "#a855f7", "#22c55e", "#f59e0b", "#ef4444", "#14b8a6"];
   var meta = null;
 
-  // One hue family per metric group; the shades keep same-group curves apart.
+  // Each group keeps its own hue family, so a whole category still reads as
+  // "one colour world". Only four, deliberately far-apart shades are used per
+  // family: eight shades of one hue could not be told apart (the previous set
+  // had a closest pair distance of 26/255). Once the shades run out, the dash
+  // style changes instead, so no two curves ever look identical.
   var GROUP_STYLES = {
-    "CPU":  ["#38bdf8", "#0ea5e9", "#22d3ee", "#67e8f9", "#0284c7", "#7dd3fc"],
-    "内存": ["#a855f7", "#c084fc", "#8b5cf6", "#d946ef", "#e879f9", "#a78bfa", "#f0abfc", "#7e22ce"],
-    "磁盘": ["#f59e0b", "#fbbf24", "#fb923c", "#fcd34d"],
-    "网络": ["#22c55e", "#4ade80", "#2dd4bf", "#a3e635"],
-    "GPU":  ["#ef4444", "#f87171", "#fb7185", "#ec4899", "#f43f5e"],
-    "系统": ["#94a3b8", "#cbd5e1", "#64748b"],
-    "其他": ["#e2e8f0", "#cbd5e1"]
+    "CPU":  ["#38bdf8", "#1d4ed8", "#a5f3fc", "#312e81"],
+    "内存": ["#a855f7", "#4c1d95", "#f0abfc", "#c026d3"],
+    "磁盘": ["#f59e0b", "#78350f", "#fde047", "#ea580c"],
+    "网络": ["#22c55e", "#14532d", "#a3e635", "#14b8a6"],
+    "GPU":  ["#ef4444", "#7f1d1d", "#fb7185", "#f97316"],
+    "系统": ["#94a3b8", "#1e293b", "#e2e8f0"],
+    "其他": ["#e2e8f0", "#64748b"]
   };
-  var metricColor = {};
+  var LINE_TYPES = ["solid", "dashed", "dotted"];
+  var metricStyle = {};
 
   function buildMetricColors(groups) {
     (groups || []).forEach(function (group) {
       var shades = GROUP_STYLES[group.label] || GROUP_STYLES["其他"];
       (group.metrics || []).forEach(function (name, index) {
-        metricColor[name] = shades[index % shades.length];
+        metricStyle[name] = {
+          color: shades[index % shades.length],
+          // A second lap through the same shade switches the dash style.
+          type: LINE_TYPES[Math.floor(index / shades.length) % LINE_TYPES.length]
+        };
       });
     });
   }
-
-  function colorFor(metric, fallbackIndex) {
-    return metricColor[metric] || palette[fallbackIndex % palette.length];
+  function styleFor(metric, fallbackIndex) {
+    return metricStyle[metric] || { color: palette[fallbackIndex % palette.length], type: "solid" };
   }
 
   // Options with no samples stay in the list but are greyed out: the same build
@@ -45,6 +53,41 @@
         }).join("") +
         '</optgroup>';
     }).join("");
+  }
+
+  // Clicking a category plots every metric of that category at once. Groups
+  // whose metrics all lack samples here stay visible but disabled, exactly like
+  // the individual options do.
+  function renderGroupButtons(groups, counts, ready) {
+    var host = S.el("group-buttons");
+    if (!host) { return; }
+    host.innerHTML = (groups || []).map(function (group) {
+      var usable = (group.metrics || []).filter(function (name) {
+        return !(ready && counts && Object.prototype.hasOwnProperty.call(counts, name) && counts[name] === 0);
+      });
+      var disabled = usable.length === 0;
+      return '<button type="button" class="btn btn-sm btn-outline-info" data-group="' +
+        S.escapeHtml(group.label) + '"' + (disabled ? ' disabled title="本机无数据"' : '') + '>' +
+        S.escapeHtml(group.label) + ' <span class="text-secondary">' + usable.length + '</span></button>';
+    }).join("");
+    host.querySelectorAll("[data-group]").forEach(function (button) {
+      button.addEventListener("click", function () { selectGroup(button.getAttribute("data-group")); });
+    });
+  }
+
+  function selectGroup(label) {
+    var select = S.el("metric-select");
+    var wanted = [];
+    Array.prototype.forEach.call(select.querySelectorAll("optgroup"), function (group) {
+      if (group.getAttribute("label") !== label) { return; }
+      Array.prototype.forEach.call(group.querySelectorAll("option"), function (option) {
+        if (!option.disabled) { wanted.push(option.value); }
+      });
+    });
+    Array.prototype.forEach.call(select.options, function (option) {
+      option.selected = wanted.indexOf(option.value) !== -1;
+    });
+    query();
   }
 
   // The API returns raw numbers, so every metric is mapped to a unit kind and
@@ -117,7 +160,7 @@
 
   function selectedMetrics() {
     var select = S.el("metric-select");
-    return Array.prototype.slice.call(select.selectedOptions, 0, 3).map(function (opt) { return opt.value; });
+    return Array.prototype.slice.call(select.selectedOptions, 0, 12).map(function (opt) { return opt.value; });
   }
 
   function buildChart() {
@@ -145,7 +188,7 @@
       var url = "/api/history?metric=" + encodeURIComponent(metric) + "&limit=2000";
       if (startMs) { url += "&start=" + startMs; }
       if (endMs) { url += "&end=" + endMs; }
-      return S.getJSON(url).then(function (data) { return { metric: metric, data: data, color: colorFor(metric, index) }; });
+      return S.getJSON(url).then(function (data) { return { metric: metric, data: data, style: styleFor(metric, index) }; });
     })).then(function (results) {
       seriesMetric = {};
       var kinds = [];
@@ -163,36 +206,42 @@
           type: "line",
           smooth: true,
           showSymbol: false,
-          yAxisIndex: kinds.indexOf(kind) === 0 ? 0 : 1,
+          yAxisIndex: kinds.indexOf(kind),
           data: entry.data.points || [],
-          lineStyle: { width: 2, color: entry.color },
-          itemStyle: { color: entry.color }
+          lineStyle: { width: 2, color: entry.style.color, type: entry.style.type },
+          itemStyle: { color: entry.style.color }
         });
       });
       var first = results[0] ? results[0].data : null;
       if (first) {
         S.setText("chart-range", S.fmtClock(first.start) + " → " + S.fmtClock(first.end) + "（" + first.total + " 条原始样本）");
       }
-      var axes = [{
-        type: "value",
-        name: UNIT_LABELS[kinds[0]] || "",
-        nameTextStyle: { color: "#94a3b8" },
-        scale: kinds[0] !== "percent",
-        axisLabel: { color: "#94a3b8", formatter: function (value) { return axisLabel(kinds[0], value); } }
-      }];
-      if (kinds.length > 1) {
-        axes.push({
+      // One axis per unit kind, alternating sides and offset when a whole
+      // category brings several units at once (CPU can span % / load / °C / RPM).
+      var axes = kinds.map(function (kind, index) {
+        return {
           type: "value",
-          position: "right",
-          name: UNIT_LABELS[kinds[1]] || "",
+          position: index % 2 === 0 ? "left" : "right",
+          offset: Math.floor(index / 2) * 46,
+          name: UNIT_LABELS[kind] || "",
           nameTextStyle: { color: "#94a3b8" },
-          scale: true,
-          axisLabel: { color: "#94a3b8", formatter: function (value) { return axisLabel(kinds[1], value); } }
-        });
-      }
+          scale: kind !== "percent",
+          axisLabel: { color: "#94a3b8", formatter: function (value) { return axisLabel(kind, value); } }
+        };
+      });
+      var leftAxes = 0;
+      var rightAxes = 0;
+      kinds.forEach(function (kind, index) { if (index % 2 === 0) { leftAxes++; } else { rightAxes++; } });
+      var grid = {
+        left: 52 + Math.max(0, leftAxes - 1) * 46,
+        right: 20 + (rightAxes ? 46 + Math.max(0, rightAxes - 1) * 46 : 0),
+        top: 34,
+        bottom: 30
+      };
       // replaceMerge (never notMerge) discards series and axes that are no
-      // longer selected, while the base option's grid and time axis survive.
+      // longer selected, while the base option's time axis survives.
       chart.setOption({
+        grid: grid,
         series: series,
         yAxis: axes,
         tooltip: {
@@ -207,8 +256,8 @@
             return lines.join("<br>");
           }
         }
-      }, { replaceMerge: ["series", "yAxis"] });
-      S.setText("query-status", "完成 · " + series.length + " 个序列" + (kinds.length > 1 ? "（左右双轴，各自单位）" : ""));
+      }, { replaceMerge: ["series", "yAxis", "grid"] });
+      S.setText("query-status", "完成 · " + series.length + " 个序列 · " + kinds.length + " 个单位轴");
     }).catch(function (err) {
       S.setText("query-status", "查询失败: " + err.message);
     });
@@ -269,6 +318,7 @@
       var ready = (payload.total_samples || 0) >= 20;
       buildMetricColors(groups);
       metricSelect.innerHTML = optionGroupsHtml(groups, counts, ready);
+      renderGroupButtons(groups, counts, ready);
       ["cpu.total", "mem.percent", "net.down_bps"].forEach(function (name) {
         var option = metricSelect.querySelector('option[value="' + name + '"]');
         if (option) { option.selected = true; }
