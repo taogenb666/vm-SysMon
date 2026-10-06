@@ -34,6 +34,7 @@
     if (typeof echarts === "undefined") { return; }
     chart = echarts.init(S.el("chart-history"));
     var option = S.lineChartDefaults();
+    option.xAxis.type = "time";   // history points are [timestamp, value]
     option.series = [];
     chart.setOption(option);
     window.addEventListener("resize", function () { if (chart) { chart.resize(); } });
@@ -49,7 +50,6 @@
     var endMs = end ? new Date(end).getTime() : null;
 
     var series = [];
-    var axis = [];
     Promise.all(metrics.map(function (metric, index) {
       var url = "/api/history?metric=" + encodeURIComponent(metric) + "&limit=2000";
       if (startMs) { url += "&start=" + startMs; }
@@ -72,9 +72,10 @@
       if (first) {
         S.setText("chart-range", S.fmtClock(first.start) + " → " + S.fmtClock(first.end) + "（" + first.total + " 条原始样本）");
       }
-      chart.setOption({ series: series }, true);
+      // Merge, never notMerge: replacing the option drops the axes and makes
+      // ECharts 5.5 throw when the x axis type is set afterwards.
       chart.setOption({
-        xAxis: { type: "time" },
+        series: series,
         tooltip: {
           trigger: "axis",
           formatter: function (params) {
