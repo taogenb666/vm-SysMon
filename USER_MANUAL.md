@@ -38,12 +38,28 @@ cd sysmon
 
 首次运行会自动创建 .venv 虚拟环境并安装依赖，随后监听 0.0.0.0:8000。
 
+环境要求：Python 3.10 或更高（Debian/Ubuntu 需先安装 python3-venv）。
+前端资源已本地化到 static/vendor/，不依赖 CDN。
+
 ### 1.2 安装为系统服务（推荐）
 
-仓库内已包含可用的 systemd 单元 /etc/systemd/system/sysmon.service：
+在目标主机上用 install.sh 一步完成：创建虚拟环境、安装依赖、按当前路径与端口
+生成 systemd 单元，并开机自启。
 
 ~~~bash
-systemctl enable --now sysmon     # 开机自启并立即启动
+sudo ./install.sh                 # 默认监听 8000
+sudo ./install.sh --port 8080     # 换端口
+sudo ./install.sh --no-service    # 只准备 venv，不安装服务
+sudo ./install.sh --uninstall     # 停止并移除服务（不动项目与数据）
+~~~
+
+单元模板在 deploy/sysmon.service，install.sh 会把其中的 __PROJECT_DIR__ 与
+__PORT__ 替换成实际值，写入 /etc/systemd/system/sysmon.service。因为路径是
+运行时生成的，项目放在任何目录都能装。
+
+日常管理：
+
+~~~bash
 systemctl status sysmon           # 查看状态
 systemctl restart sysmon          # 重启
 journalctl -u sysmon -f           # 跟踪日志
@@ -440,10 +456,16 @@ sysmon/
 │   ├── system.py      # 进程 / 连接 / systemd 服务
 │   └── main.py        # FastAPI：REST + WebSocket + SSE + 静态页面
 ├── static/            # index.html、history.html、css、js
+│   └── vendor/        # 本地化前端库（Bootstrap 5 + ECharts 5）
+├── deploy/
+│   └── sysmon.service # systemd 单元模板
+├── tools/rollback.sh  # 版本回退助手
 ├── requirements.txt
-├── run.sh
+├── run.sh             # 一键启动
+├── install.sh         # 一键安装为系统服务
 ├── README.md
 ├── USER_MANUAL.md
+├── CHANGELOG.md
 └── data/sysmon.db
 ~~~
 

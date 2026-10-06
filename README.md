@@ -21,12 +21,12 @@
     │   ├── index.html         # 仪表盘首页（卡片 + 图表 + 告警）
     │   ├── history.html       # 历史趋势页 + 告警规则管理
     │   ├── css/style.css      # 深色主题样式
-    │   └── js/
-    │       ├── common.js      # 通用格式化 / 请求 / 图表默认样式
-    │       ├── dashboard.js   # 实时渲染与滚动图表
-    │       └── history.js     # 历史查询与规则 CRUD
+    │   ├── js/                # common / dashboard / panels / history
+    │   └── vendor/            # 本地化前端库（Bootstrap 5 + ECharts 5，不依赖 CDN）
     ├── requirements.txt
     ├── run.sh                 # 一键启动（自动建 venv 并装依赖）
+    ├── install.sh             # 一键安装：venv + 依赖 + systemd 单元
+    ├── deploy/sysmon.service  # systemd 单元模板（install.sh 自动填路径与端口）
     ├── tools/rollback.sh      # 版本回退助手
     ├── README.md              # 开发与架构速览
     ├── USER_MANUAL.md         # 完整用户手册（安装、界面、操作、API、排障）
@@ -39,6 +39,13 @@
     ./run.sh                  # 首次会创建 .venv 并安装依赖
 
 然后打开 http://<本机IP>:8000/ 。
+
+在**新主机**上部署成常驻服务（需要 root）：
+
+    sudo ./install.sh                # venv + 依赖 + systemd 单元 + 开机自启
+    sudo ./install.sh --port 8080    # 换端口
+    sudo ./install.sh --no-service   # 只准备 venv，不安装服务
+    sudo ./install.sh --uninstall    # 停止并移除服务
 
 手动方式：
 
@@ -117,7 +124,8 @@ sys.proc_count, sys.user_count, sys.uptime
 
 ## 备注
 
-- 前端通过 CDN 加载 Bootstrap 5 与 ECharts 5；离线环境可把两个文件下载到 static/vendor/ 并修改 HTML 引用。
+- 前端资源已本地化到 static/vendor/（Bootstrap 5.3.3 + ECharts 5.5.0），不依赖任何 CDN，内网与离线主机也能正常显示。
+- 环境要求：Python 3.10+（Debian/Ubuntu 需先安装 python3-venv）；结束进程与启停服务需要 root。
 - 默认按 2 秒采样、保留 7 天，约 30 万行、数十 MB；如磁盘紧张可调小保留天数或加大采样间隔。
 - 无 nvidia-smi / rocm-smi 且未安装 pynvml 时，GPU 卡片会显示集显名称或"无可用遥测"，不影响其他功能。
 - 温度/风扇依赖内核 hwmon 传感器；容器或虚拟机中通常为空（面板已移除传感器卡片，数据仍随快照保留供告警使用）。

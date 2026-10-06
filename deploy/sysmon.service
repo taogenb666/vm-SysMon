@@ -1,0 +1,27 @@
+# systemd unit template for SysMon.
+#
+# install.sh substitutes two placeholders and writes the result to
+# /etc/systemd/system/sysmon.service: the absolute path of the project
+# directory (the one containing app/) and the TCP port to listen on.
+#
+# The service runs as root, which is required for the process panel (signals)
+# and the systemd service panel. Drop-in as a non-root user if you only need
+# monitoring: add  User=somebody  to [Service].
+
+[Unit]
+Description=SysMon - lightweight Linux system monitoring panel
+Documentation=file://__PROJECT_DIR__/USER_MANUAL.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=__PROJECT_DIR__
+ExecStart=__PROJECT_DIR__/.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port __PORT__
+Environment=SYSMON_HOST=0.0.0.0
+Environment=SYSMON_PORT=__PORT__
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
