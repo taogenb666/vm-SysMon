@@ -27,8 +27,10 @@
     │       └── history.js     # 历史查询与规则 CRUD
     ├── requirements.txt
     ├── run.sh                 # 一键启动（自动建 venv 并装依赖）
+    ├── tools/rollback.sh      # 版本回退助手
     ├── README.md              # 开发与架构速览
     ├── USER_MANUAL.md         # 完整用户手册（安装、界面、操作、API、排障）
+    ├── CHANGELOG.md           # 变更日志
     └── data/sysmon.db         # 运行时自动创建
 
 ## 快速开始

@@ -23,6 +23,7 @@ SQLite，通过 WebSocket 实时推送到浏览器；提供实时仪表盘、历
 11. [故障排查](#11-故障排查)
 12. [架构说明](#12-架构说明)
 13. [升级与卸载](#13-升级与卸载)
+14. [版本管理与回退](#14-版本管理与回退)
 
 ---
 
@@ -461,6 +462,90 @@ rm /etc/systemd/system/sysmon.service
 systemctl daemon-reload
 rm -rf /path/to/sysmon          # 数据在 sysmon/data/sysmon.db，按需保留
 ~~~
+
+---
+
+## 14. 版本管理与回退
+
+项目使用 Git 做版本管理。仓库位于工作区根目录
+/root/.openclaw/workspace/system-tester，sysmon/ 是仓库里的一个子目录。
+每次改动都已提交，提交信息说明了改了什么。
+
+### 14.1 查看现状
+
+~~~bash
+cd /root/.openclaw/workspace/system-tester
+git log --oneline -- sysmon     # 项目提交历史
+git status --short              # 当前有无未提交改动
+git tag -l                      # 版本标签
+git diff HEAD~1 --stat -- sysmon  # 最近一次改动动了哪些文件
+~~~
+
+### 14.2 便捷脚本（推荐）
+
+sysmon/tools/rollback.sh 封装了日常回退操作：
+
+~~~bash
+cd /root/.openclaw/workspace/system-tester/sysmon
+
+./tools/rollback.sh list            # 最近提交与标签
+./tools/rollback.sh list 30         # 看更多
+./tools/rollback.sh diff v1.0.0     # 当前与 v1.0.0 的差异
+./tools/rollback.sh restore v1.0.0  # 回退到 v1.0.0
+./tools/rollback.sh undo --yes      # 丢弃未提交的改动
+~~~
+
+restore 的行为：先确认目标版本存在、把未提交的改动 stash 备份、恢复代码、
+生成一条回退提交，然后如果 sysmon 服务在运行就自动重启它。任何一步失败都会
+立即退出并保留现场，不会继续往下做。
+
+### 14.3 手动回退
+
+不想用脚本时等价的手工步骤：
+
+~~~bash
+cd /root/.openclaw/workspace/system-tester
+git log --oneline -- sysmon                # 1. 找到目标提交
+git diff --stat <commit> -- sysmon         # 2. 确认差异
+git checkout <commit> -- sysmon            # 3. 恢复该版本代码（只影响 sysmon/）
+git commit -m "Roll sysmon back to <commit>"
+systemctl restart sysmon                   # 4. 若已装服务则重启
+~~~
+
+说明：
+- 回退只作用于代码，数据库 sysmon/data/sysmon.db 不在版本控制内，不会被覆盖。
+  也就是说历史采样数据、告警规则在回退后依然保留。
+- git checkout 会同时更新已暂存区，属于安全操作；出问题可用
+  git checkout - -- sysmon 或 git stash list 找回。
+
+### 14.4 打版本标签
+
+每次验证通过后打一个标签，日后可精确回退到已知良好状态：
+
+~~~bash
+git tag -a v1.0.1 -m "修复 xxx"
+git push backup --tags        # 若配置了远端
+~~~
+
+当前已有标签：v1.0.0（首次完整版本）。
+
+### 14.5 异地备份
+
+本地仓库目前没有配置任何远端，磁盘损坏即全部丢失。建议加一个备份远端：
+
+~~~bash
+# 方式一：本机/U 盘上的裸仓库
+git init --bare /path/to/sysmon-backup.git
+git remote add backup /path/to/sysmon-backup.git
+git push backup --all --tags
+
+# 方式二：自建 Git 服务（Gitea / GitLab / Forgejo）或私有仓库
+git remote add origin <仓库地址>
+git push origin --all --tags
+~~~
+
+注意：当前 /etc/systemd/system/sysmon.service 单元文件不在仓库内，回退不会恢复它。
+如需纳入版本管理，可把单元文件复制到 sysmon/deploy/sysmon.service 一并提交。
 
 ---
 
